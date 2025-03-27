@@ -1,0 +1,112 @@
+# yolo_clip_detector/config/datasets/coco.yaml 파일 내용
+# COCO Dataset Configuration
+
+name: COCO
+train_anno_path: data/coco/annotations/instances_train2017.json
+train_img_dir: data/coco/train2017
+val_anno_path: data/coco/annotations/instances_val2017.json
+val_img_dir: data/coco/val2017
+test_anno_path: data/coco/annotations/instances_val2017.json  # COCO doesn't provide test annotations publicly
+test_img_dir: data/coco/val2017
+
+# Dataset parameters
+img_size: [640, 640]
+max_objects: 100
+mosaic_prob: 0.5
+mixup_prob: 0.0
+
+# COCO class names
+class_names:
+  - person
+  - bicycle
+  - car
+  - motorcycle
+  - airplane
+  - bus
+  - train
+  - truck
+  - boat
+  - traffic light
+  - fire hydrant
+  - stop sign
+  - parking meter
+  - bench
+  - bird
+  - cat
+  - dog
+  - horse
+  - sheep
+  - cow
+  - elephant
+  - bear
+  - zebra
+  - giraffe
+  - backpack
+  - umbrella
+  - handbag
+  - tie
+  - suitcase
+  - frisbee
+  - skis
+  - snowboard
+  - sports ball
+  - kite
+  - baseball bat
+  - baseball glove
+  - skateboard
+  - surfboard
+  - tennis racket
+  - bottle
+  - wine glass
+  - cup
+  - fork
+  - knife
+  - spoon
+  - bowl
+  - banana
+  - apple
+  - sandwich
+  - orange
+  - broccoli
+  - carrot
+  - hot dog
+  - pizza
+  - donut
+  - cake
+  - chair
+  - couch
+  - potted plant
+  - bed
+  - dining table
+  - toilet
+  - tv
+  - laptop
+  - mouse
+  - remote
+  - keyboard
+  - cell phone
+  - microwave
+  - oven
+  - toaster
+  - sink
+  - refrigerator
+  - book
+  - clock
+  - vase
+  - scissors
+  - teddy bear
+  - hair drier
+  - toothbrush
+
+# Data augmentation
+augmentation:
+  hsv_h: 0.015  # HSV-Hue augmentation
+  hsv_s: 0.7    # HSV-Saturation augmentation
+  hsv_v: 0.4    # HSV-Value augmentation
+  degrees: 0.0  # Rotation degrees
+  translate: 0.1  # Translation
+  scale: 0.5    # Scale
+  shear: 0.0    # Shear
+  perspective: 0.0  # Perspective
+  flipud: 0.0   # Vertical flip probability
+  fliplr: 0.5   # Horizontal flip probability

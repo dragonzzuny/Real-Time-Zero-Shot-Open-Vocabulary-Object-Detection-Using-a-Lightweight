@@ -1,0 +1,43 @@
+# yolo_clip_detector/config/models/yolov8n.yaml 파일 내용
+# YOLOv8n Configuration
+
+# Model parameters
+name: YOLOv8n
+backbone_variant: n
+clip_model: ViT-B/32
+embed_dim: 512
+reg_max: 16
+strides: [8, 16, 32]
+out_channels: [128, 256, 512]  # Output channels for each FPN level
+
+# Network architecture parameters
+width_multiplier: 0.25  # Scale width of all layers
+depth_multiplier: 0.33  # Scale depth of all layers
+
+# Head parameters
+cls_alpha: 1.0  # Scaling factor for similarity score
+cls_beta: 0.0   # Shifting factor for similarity score
+width_scale: 1.0  # Width scale for bounding box regression
+height_scale: 1.0  # Height scale for bounding box regression
+
+# Training parameters
+batch_size: 32
+learning_rate: 0.01
+weight_decay: 0.0005
+optimizer_type: AdamW
+lr_scheduler_type: OneCycleLR
+warmup_epochs: 3
+max_epochs: 100
+
+# Loss parameters
+temperature: 0.1  # Temperature parameter for contrastive loss
+iou_type: ciou    # Type of IoU loss ('iou', 'giou', 'diou', 'ciou')
+label_smoothing: 0.0  # Label smoothing parameter
+loss_weights:  # Weights for different loss components
+  contrastive: 1.0
+  iou: 5.0
+  dfl: 1.0
+
+# Inference parameters
+conf_threshold: 0.25  # Confidence threshold for detections
+iou_threshold: 0.45   # IoU threshold for NMS

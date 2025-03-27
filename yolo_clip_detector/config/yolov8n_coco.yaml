@@ -1,0 +1,31 @@
+# yolo_clip_detector/config/yolov8n_coco.yaml 파일 내용
+# YOLOv8n COCO Configuration
+
+# Include base configurations
+model_config: models/yolov8n.yaml
+dataset_config: datasets/coco.yaml
+
+# Override specific parameters
+output_dir: outputs/yolov8n_coco
+batch_size: 16
+max_epochs: 100
+save_interval: 10
+eval_interval: 5
+
+# Training settings
+learning_rate: 0.001
+weight_decay: 0.0005
+warmup_epochs: 3
+
+# Augmentation settings
+mosaic_prob: 0.5
+mixup_prob: 0.0
+
+# Loss settings
+temperature: 0.1
+iou_type: ciou
+label_smoothing: 0.0
+loss_weights:
+  contrastive: 1.0
+  iou: 5.0
+  dfl: 1.0

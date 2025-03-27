@@ -1,0 +1,13 @@
+Metadata-Version: 2.1
+Name: yolo-clip-detector
+Version: 0.1.0
+Summary: YOLO-CLIP: Open-Vocabulary Object Detection with Vision-Language Model
+Home-page: https://github.com/yourusername/yolo_clip_detector
+Author: YourName
+Author-email: your.email@example.com
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Requires-Python: >=3.7

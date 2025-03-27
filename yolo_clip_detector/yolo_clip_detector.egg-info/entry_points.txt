@@ -1,0 +1,3 @@
+[console_scripts]
+yolo-clip-detect = yolo_clip_detector.detect:main
+yolo-clip-train = yolo_clip_detector.train:main

@@ -1,0 +1,31 @@
+# yolo_clip_detector/config/yolov8l_objects365.yaml 파일 내용
+# YOLOv8l Objects365 Configuration
+
+# Include base configurations
+model_config: models/yolov8l.yaml
+dataset_config: datasets/objects365.yaml
+
+# Override specific parameters
+output_dir: outputs/yolov8l_objects365
+batch_size: 4
+max_epochs: 50
+save_interval: 5
+eval_interval: 2
+
+# Training settings
+learning_rate: 0.0001
+weight_decay: 0.0005
+warmup_epochs: 5
+
+# Augmentation settings
+mosaic_prob: 0.5
+mixup_prob: 0.2
+
+# Loss settings
+temperature: 0.1
+iou_type: ciou
+label_smoothing: 0.1
+loss_weights:
+  contrastive: 1.0
+  iou: 5.0
+  dfl: 1.0

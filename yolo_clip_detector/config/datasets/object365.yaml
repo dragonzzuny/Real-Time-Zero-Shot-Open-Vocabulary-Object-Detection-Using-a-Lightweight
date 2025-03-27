@@ -1,0 +1,52 @@
+# yolo_clip_detector/config/datasets/objects365.yaml 파일 내용
+# Objects365 Dataset Configuration
+
+name: Objects365
+train_anno_path: data/objects365/annotations/zhiyuan_objv2_train.json
+train_img_dir: data/objects365/train
+val_anno_path: data/objects365/annotations/zhiyuan_objv2_val.json
+val_img_dir: data/objects365/val
+
+# Dataset parameters
+img_size: [640, 640]
+max_objects: 200  # Objects365 has more objects per image
+mosaic_prob: 0.5
+mixup_prob: 0.2
+
+# Objects365 has 365 classes - shortened here to first 20 for brevity
+# Full list should be replaced with actual Objects365 classes
+class_names:
+  - person
+  - sneakers
+  - chair
+  - hat
+  - lamp
+  - bottle
+  - cabinet/shelf
+  - cup
+  - car
+  - glasses
+  - picture/frame
+  - desk
+  - handbag
+  - street lights
+  - book
+  - plate
+  - helmet
+  - leather shoes
+  - pillow
+  - glove
+  # ... remaining classes omitted for brevity ...
+
+# Data augmentation (stronger for larger dataset)
+augmentation:
+  hsv_h: 0.015  # HSV-Hue augmentation
+  hsv_s: 0.7    # HSV-Saturation augmentation
+  hsv_v: 0.4    # HSV-Value augmentation
+  degrees: 0.0  # Rotation degrees
+  translate: 0.1  # Translation
+  scale: 0.5    # Scale
+  shear: 0.0    # Shear
+  perspective: 0.0  # Perspective
+  flipud: 0.0   # Vertical flip probability
+  fliplr: 0.5   # Horizontal flip probability
