@@ -147,58 +147,71 @@ class BoxHead(nn.Module):
         
         return grid
     
-    def decode_boxes(self, 
-                     box_preds: List[torch.Tensor], 
-                     grids: List[torch.Tensor]) -> torch.Tensor:
+    def decode_boxes(self, box_preds: List[torch.Tensor], grids: List[torch.Tensor]) -> torch.Tensor:
         """
         Decode bounding box predictions into coordinates.
         
         Args:
-            box_preds: List of box predictions from forward pass
-            grids: List of grid information from forward pass
+            box_preds: Box predictions from forward pass
+            grids: Grid information from forward pass
             
         Returns:
             Decoded boxes of shape (batch_size, total_predictions, 4)
         """
+        batch_size = box_preds[0].shape[0]
         all_boxes = []
         
-        for pred, grid in zip(box_preds, grids):
-            batch_size, _, height, width = pred.shape
+        # Process each feature level
+        for feat_idx, (pred, grid) in enumerate(zip(box_preds, grids)):
+            # Get dimensions
+            batch_size, channels, height, width = pred.shape
+            stride = self.strides[feat_idx]
             
-            # Reshape to (batch_size, 4, reg_max+1, height, width)
-            pred = pred.reshape(batch_size, 4, self.reg_max + 1, height, width)
+            # Get grid coordinates and stride information
+            grid_xy = grid[..., :2]  # (batch_size, height, width, 2)
             
-            # Apply softmax to get distribution over reg_max+1 bins
+            # Method for handling 4*(reg_max+1) channels format
+            # We expect channels = 4*(reg_max+1)
+            expected_channels = 4 * (self.reg_max + 1)
+            if channels != expected_channels:
+                print(f"Warning: Expected {expected_channels} channels, got {channels}. Adjusting...")
+            
+            # Reshape to (batch_size, 4, channels//4, height, width)
+            # This assumes channels is divisible by 4
+            channels_per_coord = channels // 4
+            pred = pred.reshape(batch_size, 4, channels_per_coord, height, width)
+            
+            # Apply softmax to each coordinate's distribution
             pred = pred.softmax(dim=2)
             
-            # Project distribution to value using DFL
-            reg_vals = pred * torch.arange(0, self.reg_max + 1, device=pred.device).float()
-            reg_vals = reg_vals.sum(dim=2)  # (batch_size, 4, height, width)
+            # Create distribution weights
+            distribution = torch.arange(channels_per_coord, device=pred.device).float()
             
-            # Get grid information
-            grid_xy = grid[..., :2]  # (batch_size, height, width, 2)
-            stride = grid[..., 2:3]  # (batch_size, height, width, 1)
+            # Calculate the expected value for each coordinate (x, y, w, h)
+            # (batch, 4, H, W) = sum((batch, 4, C, H, W) * (1, 1, C, 1, 1), dim=2)
+            reg_vals = (pred * distribution.view(1, 1, -1, 1, 1)).sum(dim=2)
             
-            # Permute reg_vals to match grid shape
-            reg_vals = reg_vals.permute(0, 2, 3, 1)  # (batch_size, height, width, 4)
+            # Reshape to (batch, H, W, 4)
+            reg_vals = reg_vals.permute(0, 2, 3, 1)
+            
+            # Ensure grid_xy and reg_vals have compatible shapes
+            # grid_xy: (batch_size, height, width, 2)
+            # reg_vals: (batch_size, height, width, 4)
             
             # Decode boxes
-            # x_center = (grid_x + offset_x) * stride
-            # y_center = (grid_y + offset_y) * stride
-            # w = exp(reg_vals[2]) * stride
-            # h = exp(reg_vals[3]) * stride
+            # Center coordinates = grid + offset
             xy_center = (grid_xy + reg_vals[..., :2]) * stride
+            # Width and height = exp(pred) * stride
             wh = torch.exp(reg_vals[..., 2:]) * stride
             
             # Convert to (x1, y1, x2, y2) format
             boxes = torch.cat([
-                xy_center - wh / 2,  # top-left (x1, y1)
-                xy_center + wh / 2   # bottom-right (x2, y2)
+                xy_center - wh / 2,  # x1, y1
+                xy_center + wh / 2   # x2, y2
             ], dim=-1)
             
             # Reshape to (batch_size, height*width, 4)
-            boxes = boxes.reshape(batch_size, -1, 4)
-            
+            boxes = boxes.reshape(batch_size, height * width, 4)
             all_boxes.append(boxes)
         
         # Concatenate all feature levels
