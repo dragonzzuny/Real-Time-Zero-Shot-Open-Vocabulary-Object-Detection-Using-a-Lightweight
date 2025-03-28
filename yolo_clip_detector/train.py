@@ -1,5 +1,10 @@
 # yolo_clip_detector/train.py 파일 내용
 import os
+import sys
+# 프로젝트 루트 디렉토리를 PYTHONPATH에 추가
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir)
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -11,7 +16,8 @@ from datetime import datetime
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
-from model.yolo_clip import YOLOCLIP
+
+from yolo_clip_detector.model.yolo_clip import YOLOCLIP
 from data.coco_dataset import COCODataset
 from train.trainer import YOLOCLIPTrainer
 from config.default_config import TrainingConfig
