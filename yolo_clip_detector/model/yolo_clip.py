@@ -7,8 +7,9 @@ from .backbones.yolov8 import YOLOv8Backbone
 from .repvl_pan import RepVLPAN
 from .heads.text_contrastive import TextContrastiveHead
 from .heads.box_head import BoxHead
-from ..clip.text_encoder import CLIPTextEncoder
-from ..clip.vocab_builder import VocabularyBuilder
+
+from yolo_clip_detector.clip.text_encoder import CLIPTextEncoder
+from yolo_clip_detector.clip.vocab_builder import VocabularyBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +101,7 @@ class YOLOCLIP(nn.Module):
     
     def forward(self, 
                 images: torch.Tensor, 
-                text_prompts: Optional[List[str]] = None,
+                text_prompts: Optional[Union[List[str], List[List[str]]]] = None,
                 class_names: Optional[List[str]] = None) -> Dict[str, torch.Tensor]:
         """
         Forward pass through the YOLO-CLIP model.
@@ -108,6 +109,7 @@ class YOLOCLIP(nn.Module):
         Args:
             images: Input images of shape (batch_size, 3, height, width)
             text_prompts: Text prompts for online vocabulary (ignored in offline mode)
+                Can be a list of strings or a batch of lists of strings
             class_names: Class names for offline vocabulary (used only if offline_vocabulary is None)
             
         Returns:
@@ -130,7 +132,11 @@ class YOLOCLIP(nn.Module):
                 raise ValueError("In online mode, text_prompts must be provided")
             
             # Build online vocabulary from text prompts
-            text_embeddings = self.text_encoder(text_prompts).unsqueeze(0).expand(batch_size, -1, -1)
+            text_embeddings = self.text_encoder(text_prompts)
+            
+            # If text_prompts is a list of strings (not batch), expand to batch size
+            if len(text_embeddings.shape) == 2:
+                text_embeddings = text_embeddings.unsqueeze(0).expand(batch_size, -1, -1)
         
         # Extract features from backbone
         features = self.backbone(images)
@@ -185,7 +191,9 @@ class YOLOCLIP(nn.Module):
             'boxes': boxes,               # (batch_size, num_boxes, 4)
             'scores': scores,             # (batch_size, num_boxes)
             'class_ids': class_ids,       # (batch_size, num_boxes)
-            'obj_embeddings': obj_embeddings  # (batch_size, num_boxes, embed_dim)
+            'obj_embeddings': obj_embeddings,  # (batch_size, num_boxes, embed_dim)
+            'text_embeddings': updated_text_embeddings,  # Include text embeddings in output
+            'box_preds': box_preds  # Include box predictions for loss calculation
         }
     
     def set_offline_vocabulary(self, 
