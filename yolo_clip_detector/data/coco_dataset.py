@@ -90,6 +90,71 @@ class COCODataset(Dataset):
         """Get the length of the dataset"""
         return len(self.image_ids)
     
+    
+    
+    def _resize_image_and_boxes(self, 
+                               img: np.ndarray, 
+                               boxes: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Resize image and adjust boxes accordingly.
+        
+        Args:
+            img: Input image
+            boxes: Bounding boxes
+            
+        Returns:
+            Tuple of (resized image, adjusted boxes)
+        """
+        # Get original size
+        orig_h, orig_w = img.shape[:2]
+        
+        # Get target size
+        target_h, target_w = self.img_size
+        
+        # Calculate resize ratio
+        ratio = min(target_h / orig_h, target_w / orig_w)
+        
+        # Resize image
+        new_h, new_w = int(orig_h * ratio), int(orig_w * ratio)
+        resized_img = cv2.resize(img, (new_w, new_h))
+        
+        # Create padded image
+        padded_img = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+        padded_img[:new_h, :new_w, :] = resized_img
+        
+        # Adjust boxes
+        if len(boxes) > 0:
+            boxes[:, [0, 2]] = boxes[:, [0, 2]] * ratio
+            boxes[:, [1, 3]] = boxes[:, [1, 3]] * ratio
+        
+        return padded_img, boxes
+    
+    def _to_tensor(self, img) -> torch.Tensor:
+        """
+        Convert image to tensor.
+        
+        Args:
+            img: Input image (numpy array or torch.Tensor)
+            
+        Returns:
+            Image tensor in (C, H, W) format normalized to [0, 1]
+        """
+        # 만약 img가 이미 torch.Tensor라면, 그대로 반환하거나 정규화만 진행
+        if isinstance(img, torch.Tensor):
+            # 만약 0~255 범위라면 255로 나누어 정규화할 수 있지만,
+            # 이미 정규화된 상태라면 그냥 반환합니다.
+            # 여기서는 이미 정규화되어 있다고 가정하고 그대로 반환합니다.
+            return img
+        else:
+            # NumPy 배열인 경우, float32로 변환 후 정규화
+            img = img.astype(np.float32) / 255.0
+            # (H, W, C) -> (C, H, W)로 차원 변경
+            img = torch.from_numpy(img).permute(2, 0, 1)
+            return img
+
+
+
+    
     def __getitem__(self, index: int) -> Dict:
         """
         Get a single data item.
@@ -176,10 +241,12 @@ class COCODataset(Dataset):
             class_ids_padded[:len(class_ids)] = class_ids
             valid_mask_padded[:len(valid_mask)] = valid_mask
         
-        # Create text prompts for class names
-        text_prompts = [f"a photo of a {self.class_names[i]}" for i in np.unique(class_ids)]
+        # Create text prompts for each unique class in the image
+        unique_classes = np.unique(class_ids)
+        text_prompts = [f"a photo of a {self.class_names[i]}" for i in unique_classes]
+        
+        # Ensure there's at least one prompt for images with no objects
         if not text_prompts:
-            # If no objects in the image, add a default prompt
             text_prompts = [f"a photo of a {self.class_names[0]}"]
         
         return {
@@ -191,63 +258,7 @@ class COCODataset(Dataset):
             'image_id': img_id,                        # Original image ID
             'orig_size': (img_info['height'], img_info['width'])  # Original image size
         }
-    
-    def _resize_image_and_boxes(self, 
-                               img: np.ndarray, 
-                               boxes: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Resize image and adjust boxes accordingly.
-        
-        Args:
-            img: Input image
-            boxes: Bounding boxes
-            
-        Returns:
-            Tuple of (resized image, adjusted boxes)
-        """
-        # Get original size
-        orig_h, orig_w = img.shape[:2]
-        
-        # Get target size
-        target_h, target_w = self.img_size
-        
-        # Calculate resize ratio
-        ratio = min(target_h / orig_h, target_w / orig_w)
-        
-        # Resize image
-        new_h, new_w = int(orig_h * ratio), int(orig_w * ratio)
-        resized_img = cv2.resize(img, (new_w, new_h))
-        
-        # Create padded image
-        padded_img = np.zeros((target_h, target_w, 3), dtype=np.uint8)
-        padded_img[:new_h, :new_w, :] = resized_img
-        
-        # Adjust boxes
-        if len(boxes) > 0:
-            boxes[:, [0, 2]] = boxes[:, [0, 2]] * ratio
-            boxes[:, [1, 3]] = boxes[:, [1, 3]] * ratio
-        
-        return padded_img, boxes
-    
-    def _to_tensor(self, img: np.ndarray) -> torch.Tensor:
-        """
-        Convert image to tensor.
-        
-        Args:
-            img: Input image
-            
-        Returns:
-            Image tensor
-        """
-        # Normalize to [0, 1]
-        img = img.astype(np.float32) / 255.0
-        
-        # Convert to (C, H, W) format
-        img = img.transpose(2, 0, 1)
-        
-        # Convert to tensor
-        return torch.from_numpy(img)
-    
+
     def _get_mosaic_item(self, index: int) -> Dict:
         """
         Get a mosaic-augmented item.
@@ -361,8 +372,9 @@ class COCODataset(Dataset):
                 class_ids = class_ids[valid_boxes]
                 
                 # Add to mosaic list
-                mosaic_boxes.append(boxes)
-                mosaic_class_ids.append(class_ids)
+                if len(boxes) > 0:
+                    mosaic_boxes.append(boxes)
+                    mosaic_class_ids.append(class_ids)
         
         # Concatenate boxes and class_ids
         if mosaic_boxes:
@@ -396,10 +408,12 @@ class COCODataset(Dataset):
             class_ids_padded[:n] = mosaic_class_ids[:n]
             valid_mask_padded[:n] = valid_mask[:n]
         
-        # Create text prompts for class names
-        text_prompts = [f"a photo of a {self.class_names[i]}" for i in np.unique(mosaic_class_ids)]
+        # Create text prompts for unique classes in the mosaic
+        unique_classes = np.unique(mosaic_class_ids)
+        text_prompts = [f"a photo of a {self.class_names[i]}" for i in unique_classes if i < len(self.class_names)]
+        
+        # Ensure there's at least one prompt for mosaic with no objects
         if not text_prompts:
-            # If no objects in the image, add a default prompt
             text_prompts = [f"a photo of a {self.class_names[0]}"]
         
         return {
