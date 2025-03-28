@@ -38,10 +38,10 @@ class RegionTextContrastiveLoss(nn.Module):
                    f"reduction={reduction}, topk={topk}, label_smoothing={label_smoothing}")
     
     def forward(self, 
-                region_features: torch.Tensor, 
-                text_embeddings: torch.Tensor, 
-                region_labels: torch.Tensor,
-                valid_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+            region_features: torch.Tensor, 
+            text_embeddings: torch.Tensor, 
+            region_labels: torch.Tensor,
+            valid_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Compute the region-text contrastive loss.
         
@@ -56,6 +56,11 @@ class RegionTextContrastiveLoss(nn.Module):
         """
         batch_size, num_regions, embed_dim = region_features.shape
         num_classes = text_embeddings.shape[1]
+        
+        # 디버깅 출력 추가
+        print(f"region_labels shape: {region_labels.shape}")
+        print(f"region_labels min: {region_labels.min().item()}, max: {region_labels.max().item()}")
+        print(f"num_classes: {num_classes}")
         
         # Normalize features and embeddings
         region_features = F.normalize(region_features, p=2, dim=-1)
@@ -72,6 +77,19 @@ class RegionTextContrastiveLoss(nn.Module):
         
         # Process region labels
         if region_labels.dim() == 2:  # If labels are class indices
+            # 클래스 인덱스가 num_classes보다 크거나 같은 경우 처리
+            invalid_labels = region_labels >= num_classes
+            if invalid_labels.any():
+                # 잘못된 레이블을 0으로 설정하고 나중에 손실 계산에서 제외
+                print(f"WARNING: {invalid_labels.sum().item()} labels exceed num_classes={num_classes}")
+                region_labels = torch.where(invalid_labels, torch.zeros_like(region_labels), region_labels)
+                
+                # valid_mask가 없으면 생성하고, 있으면 업데이트
+                if valid_mask is None:
+                    valid_mask = ~invalid_labels
+                else:
+                    valid_mask = valid_mask & ~invalid_labels
+            
             # Convert to one-hot encoding
             labels_oh = F.one_hot(region_labels, num_classes).float()
         else:  # If labels are already one-hot encoded
