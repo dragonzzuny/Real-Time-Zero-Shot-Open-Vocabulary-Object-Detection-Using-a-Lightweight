@@ -1,9 +1,9 @@
-# yolo_clip_detector/model/repvl_pan.py 파일 내용
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import List, Dict, Tuple, Optional
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -124,88 +124,17 @@ class ImagePoolingAttention(nn.Module):
     image features and applying multi-head attention.
     """
     
-    def __init__(self, in_channels: List[int], embed_dim: int, num_heads: int = 8):
-        """
-        Initialize the ImagePoolingAttention.
-        
-        Args:
-            in_channels: List of input channel dimensions for each feature map
-            embed_dim: Embedding dimension
-            num_heads: Number of attention heads
-        """
-        super().__init__()
-        
-        self.max_pool = nn.AdaptiveMaxPool2d((3, 3))  # Pool to 3x3 regions
-        self.mha = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads, batch_first=True)
-        
-        # Create projection layers for each feature map to standardize dimensions
-        self.projections = nn.ModuleList([
-            nn.Linear(in_channel, embed_dim) for in_channel in in_channels
-        ])
-    
-    def forward(self, text_embeddings: torch.Tensor, feature_maps: List[torch.Tensor]) -> torch.Tensor:
-        """
-        Forward pass through the ImagePoolingAttention.
-        
-        Args:
-            text_embeddings: Text embeddings of shape (batch_size, num_classes, embed_dim)
-            feature_maps: List of multi-scale feature maps [(B, C3, H3, W3), (B, C4, H4, W4), (B, C5, H5, W5)]
-            
-        Returns:
-            Updated text embeddings of shape (batch_size, num_classes, embed_dim)
-        """
-        batch_size = text_embeddings.shape[0]
-        patch_tokens_list = []
-        
-        # Process each feature map
-        for i, feature_map in enumerate(feature_maps):
-            # Apply max pooling to get 3x3 regions
-            pooled = self.max_pool(feature_map)  # (B, C, 3, 3)
-            
-            # Reshape to patch tokens
-            B, C, H, W = pooled.shape
-            patch_tokens = pooled.permute(0, 2, 3, 1).reshape(B, H*W, C)  # (B, 9, C)
-            
-            # Project to common embedding dimension
-            patch_tokens = self.projections[i](patch_tokens)  # (B, 9, embed_dim)
-            
-            # Add to the list of patch tokens
-            patch_tokens_list.append(patch_tokens)
-        
-        # Concatenate all patch tokens (3 feature maps × 9 patches = 27 patches)
-        all_patch_tokens = torch.cat(patch_tokens_list, dim=1)  # (B, 27, embed_dim)
-        
-        # Apply multi-head attention to update text embeddings
-        updated_text_embeddings, _ = self.mha(
-            query=text_embeddings,
-            key=all_patch_tokens,
-            value=all_patch_tokens
-        )
-        
-        # Add residual connection
-        text_embeddings = text_embeddings + updated_text_embeddings
-        
-        return text_embeddings
-
-class ImagePoolingAttention(nn.Module):
-    """
-    Image Pooling Attention (I-Pooling Attention) as described in YOLO-World paper
-    
-    This module enhances text embeddings with image-aware information by aggregating
-    image features and applying multi-head attention.
-    """
-    
     def __init__(self, embed_dim: int, num_heads: int = 8):
         super().__init__()
         
         self.max_pool = nn.AdaptiveMaxPool2d((3, 3))  # Pool to 3x3 regions
         self.mha = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads, batch_first=True)
         
-        # Add projection layers for each feature level to handle different channel dimensions
+        # For YOLOv8n adjusted channel dimensions (scaled down by 0.25)
         self.projections = nn.ModuleList([
-            nn.Linear(256, embed_dim),   # C3 projection
-            nn.Linear(512, embed_dim),   # C4 projection
-            nn.Linear(1024, embed_dim)   # C5 projection
+            nn.Linear(64, embed_dim),   # C3 projection - YOLOv8n scaled
+            nn.Linear(128, embed_dim),  # C4 projection - YOLOv8n scaled
+            nn.Linear(256, embed_dim)   # C5 projection - YOLOv8n scaled
         ])
     
     def forward(self, text_embeddings: torch.Tensor, feature_maps: List[torch.Tensor]) -> torch.Tensor:
@@ -251,3 +180,136 @@ class ImagePoolingAttention(nn.Module):
         text_embeddings = text_embeddings + updated_text_embeddings
         
         return text_embeddings
+
+
+class RepVLPAN(nn.Module):
+    """
+    Re-parameterizable Vision-Language Path Aggregation Network (RepVL-PAN)
+    
+    This module connects vision and language features through bidirectional fusion.
+    """
+    
+    def __init__(self, 
+                 in_channels: List[int], 
+                 out_channels: List[int], 
+                 text_dim: int,
+                 n_bottlenecks: int = 1):
+        super().__init__()
+        
+        assert len(in_channels) == 3, "RepVLPAN requires 3 input feature maps (C3, C4, C5)"
+        
+        # Store the input and output channel dimensions
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        
+        # Lateral connections for FPN - maintain original channel sizes
+        self.lateral_convs = nn.ModuleList([
+            ConvBlock(in_channels[i], in_channels[i], kernel_size=1)
+            for i in range(3)
+        ])
+        
+        # Channel adjustment layers for upsampling path
+        self.up_channels = nn.ModuleList([
+            ConvBlock(in_channels[2], in_channels[1], kernel_size=1),  # P5 -> P4 channels
+            ConvBlock(in_channels[1], in_channels[0], kernel_size=1)   # P4 -> P3 channels
+        ])
+        
+        # FPN convolutions
+        self.fpn_convs = nn.ModuleList([
+            ConvBlock(in_channels[i], out_channels[i], kernel_size=3)
+            for i in range(3)
+        ])
+        
+        # Upsampling
+        self.upsample = nn.Upsample(scale_factor=2, mode='nearest')
+        
+        # Downsampling convolutions for bottom-up path (adjusting channels)
+        self.downsample_convs = nn.ModuleList([
+            ConvBlock(out_channels[i], out_channels[i+1], kernel_size=3, stride=2)
+            for i in range(2)
+        ])
+        
+        # Text-guided CSPLayers
+        self.text_csplayers = nn.ModuleList([
+            TextGuidedCSPLayer(out_channels[i], out_channels[i], text_dim, n_bottlenecks=n_bottlenecks)
+            for i in range(3)
+        ])
+        
+        # Image pooling attention
+        self.image_pooling_attention = ImagePoolingAttention(embed_dim=text_dim)
+        
+        logger.info(f"RepVLPAN initialized with in_channels={in_channels}, out_channels={out_channels}")
+    
+    def forward(self, 
+                features: List[torch.Tensor], 
+                text_embeddings: torch.Tensor) -> Tuple[List[torch.Tensor], torch.Tensor]:
+        """
+        Forward pass through the RepVLPAN.
+        
+        Args:
+            features: List of feature maps [C3, C4, C5] from the backbone
+            text_embeddings: Text embeddings of shape (batch_size, num_classes, text_dim)
+            
+        Returns:
+            Tuple of (List of enhanced feature maps [P3, P4, P5], Updated text embeddings)
+        """
+        # Print feature shapes for debugging
+        logger.info(f"Feature shapes: {[f.shape for f in features]}")
+        
+        # Update text embeddings with image-aware information
+        text_embeddings = self.image_pooling_attention(text_embeddings, features)
+        
+        # Apply lateral convolutions
+        laterals = [conv(features[i]) for i, conv in enumerate(self.lateral_convs)]
+        
+        # Top-down path (FPN) with channel adjustment
+        fpn_features = [laterals[2]]  # P5
+        
+        # P4 = lateral4 + channel_adjusted_upsampled_P5
+        p5_upsampled = self.upsample(fpn_features[0])
+        p5_adjusted = self.up_channels[0](p5_upsampled)  # Adjust channels
+        p4 = laterals[1] + p5_adjusted
+        fpn_features.insert(0, p4)
+        
+        # P3 = lateral3 + channel_adjusted_upsampled_P4
+        p4_upsampled = self.upsample(fpn_features[0])
+        p4_adjusted = self.up_channels[1](p4_upsampled)  # Adjust channels
+        p3 = laterals[0] + p4_adjusted
+        fpn_features.insert(0, p3)
+        
+        # Apply FPN convolutions (with channel adjustment to out_channels)
+        fpn_features = [conv(feat) for feat, conv in zip(fpn_features, self.fpn_convs)]
+        
+        # Bottom-up path with text guidance
+        pan_features = [self.text_csplayers[0](fpn_features[0], text_embeddings)]
+        
+        # P4 = CSP(P4 + Downsample(P3))
+        p4 = self.text_csplayers[1](
+            fpn_features[1] + self.downsample_convs[0](pan_features[0]),
+            text_embeddings
+        )
+        pan_features.append(p4)
+        
+        # P5 = CSP(P5 + Downsample(P4))
+        p5 = self.text_csplayers[2](
+            fpn_features[2] + self.downsample_convs[1](pan_features[1]),
+            text_embeddings
+        )
+        pan_features.append(p5)
+        
+        return pan_features, text_embeddings
+    
+    def reparameterize(self, text_embeddings: torch.Tensor) -> nn.Module:
+        """
+        Re-parameterize the model using provided text embeddings for efficient deployment.
+        
+        Args:
+            text_embeddings: Text embeddings for offline vocabulary
+            
+        Returns:
+            Re-parameterized model without text encoder
+        """
+        # This would implement the re-parameterization logic for deployment
+        # For now, just return the model itself (implementation to be completed)
+        logger.warning("RepVLPAN re-parameterization not fully implemented")
+        return self
