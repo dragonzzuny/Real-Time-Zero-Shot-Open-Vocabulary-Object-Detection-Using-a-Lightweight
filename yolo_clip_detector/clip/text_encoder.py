@@ -1,4 +1,3 @@
-# yolo_clip_detector/clip/text_encoder.py 파일 내용
 import torch
 import torch.nn as nn
 import clip
@@ -44,24 +43,48 @@ class CLIPTextEncoder(nn.Module):
             
         logger.info(f"CLIP Text Encoder initialized with embedding dimension: {embed_dim}")
     
-    def forward(self, text_prompts: List[str]) -> torch.Tensor:
+    def forward(self, text_prompts: Union[List[str], List[List[str]]]) -> torch.Tensor:
         """
         Encode a list of text prompts into embeddings.
         
         Args:
-            text_prompts: List of text prompts to encode
+            text_prompts: List of text prompts to encode or a batch of lists of text prompts
         
         Returns:
-            Normalized text embeddings tensor of shape (num_prompts, embed_dim)
+            Normalized text embeddings tensor
         """
-        # Tokenize and encode text
-        text_tokens = clip.tokenize(text_prompts).to(self.device)
-        text_embeddings = self.text_encoder(text_tokens)
-        
-        # Normalize embeddings
-        text_embeddings = text_embeddings / text_embeddings.norm(dim=-1, keepdim=True)
-        
-        return text_embeddings
+        # Check if input is a batch of lists or a single list
+        if isinstance(text_prompts[0], list):
+            # Handle batch of lists with different lengths
+            batch_embeddings = []
+            
+            for prompts in text_prompts:
+                # Tokenize and encode text for this instance
+                tokens = clip.tokenize(prompts).to(self.device)
+                embeddings = self.text_encoder(tokens)
+                
+                # Normalize embeddings
+                embeddings = embeddings / embeddings.norm(dim=-1, keepdim=True)
+                
+                # Average the embeddings if there are multiple prompts
+                if len(prompts) > 1:
+                    embedding = embeddings.mean(dim=0, keepdim=True)
+                else:
+                    embedding = embeddings
+                    
+                batch_embeddings.append(embedding)
+            
+            # Stack the batch embeddings
+            return torch.cat(batch_embeddings, dim=0)
+        else:
+            # Handle single list of prompts
+            text_tokens = clip.tokenize(text_prompts).to(self.device)
+            text_embeddings = self.text_encoder(text_tokens)
+            
+            # Normalize embeddings
+            text_embeddings = text_embeddings / text_embeddings.norm(dim=-1, keepdim=True)
+            
+            return text_embeddings
     
     def encode_vocabulary(self, vocabulary: List[str]) -> torch.Tensor:
         """
