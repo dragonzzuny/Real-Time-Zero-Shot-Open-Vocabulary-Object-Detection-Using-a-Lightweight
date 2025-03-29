@@ -170,11 +170,11 @@ class BoxHead(nn.Module):
             # Get grid coordinates and stride information
             grid_xy = grid[..., :2]  # (batch_size, height, width, 2)
             
-            # Method for handling 4*(reg_max+1) channels format
-            # We expect channels = 4*(reg_max+1)
+            # 오류 처리 및 로깅 추가
             expected_channels = 4 * (self.reg_max + 1)
             if channels != expected_channels:
-                print(f"Warning: Expected {expected_channels} channels, got {channels}. Adjusting...")
+                logger.warning(f"Expected {expected_channels} channels, got {channels}. Adjusting...")
+        
             
             # Reshape to (batch_size, 4, channels//4, height, width)
             # This assumes channels is divisible by 4
