@@ -1,4 +1,4 @@
-# yolo_clip_detector/loss/region_text_contrastive.py 파일 내용
+# yolo_clip_detector/loss/region_text_contrastive.py
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

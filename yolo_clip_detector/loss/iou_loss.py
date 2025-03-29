@@ -61,7 +61,32 @@ class IoULoss(nn.Module):
         
         # Apply weights if provided
         if weights is not None:
-            loss = loss * weights.unsqueeze(-1)
+            # 디버깅용 로깅 추가
+            logger.info(f"Loss shape: {loss.shape}, weights shape: {weights.shape}")
+            
+            # 텐서 차원을 고려하여 올바른 dimension에서 크기를 확인
+            if loss.dim() == 3 and weights.dim() == 2:
+                if weights.shape[1] != loss.shape[1]:
+                    logger.info(f"Reshaping weights from {weights.shape} to match loss shape {loss.shape}")
+                    if weights.shape[1] > loss.shape[1]:
+                        weights = weights[:, :loss.shape[1]]
+                    else:
+                        padding = torch.zeros(
+                            weights.shape[0], 
+                            loss.shape[1] - weights.shape[1],
+                            device=weights.device,
+                            dtype=weights.dtype
+                        )
+                        weights = torch.cat([weights, padding], dim=1)
+                
+                # 차원 맞추기
+                weights = weights.unsqueeze(-1)
+            
+            # 만약 크기가 여전히 맞지 않는다면, 경고 출력 후 weights 없이 진행
+            if weights.shape[1] != loss.shape[1]:
+                logger.warning(f"Weights shape {weights.shape} still doesn't match loss shape {loss.shape}. Ignoring weights.")
+            else:
+                loss = loss * weights
         
         # Apply reduction
         if self.reduction == 'mean':
