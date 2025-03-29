@@ -63,6 +63,27 @@ def create_transforms(img_size, training=True):
             ToTensorV2()
         ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_ids']))
 
+def custom_collate_fn(batch):
+    """
+    커스텀 collate 함수 - 가변 길이 리스트(text_prompts)를 처리합니다.
+    """
+    elem = batch[0]
+    result = {}
+    
+    for key in elem:
+        if key == 'text_prompts':
+            # text_prompts는 각 배치 항목의 리스트를 그대로 유지
+            result[key] = [d[key] for d in batch]
+        else:
+            # 다른 필드는 기본 collate 함수 사용
+            try:
+                result[key] = torch.utils.data.dataloader.default_collate([d[key] for d in batch])
+            except RuntimeError:
+                # 기본 collate가 실패하면 리스트로 유지
+                result[key] = [d[key] for d in batch]
+    
+    return result
+
 def main():
     """Main training function"""
     args = parse_args()
@@ -139,10 +160,10 @@ def main():
         num_workers=config.num_workers,
         pin_memory=True,
         drop_last=True,
-        collate_fn=None  # Default collate_fn works fine for our case
+        collate_fn=custom_collate_fn  # 커스텀 collate 함수 적용
     )
-    
-    val_dataloader = None
+
+    # 검증 데이터로더도 동일하게 수정
     if val_dataset is not None:
         val_dataloader = DataLoader(
             val_dataset,
@@ -150,7 +171,7 @@ def main():
             shuffle=False,
             num_workers=config.num_workers,
             pin_memory=True,
-            collate_fn=None
+            collate_fn=custom_collate_fn  # 커스텀 collate 함수 적용
         )
     
     # Create model
