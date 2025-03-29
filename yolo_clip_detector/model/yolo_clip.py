@@ -117,7 +117,7 @@ class YOLOCLIP(nn.Module):
         """
         batch_size = images.shape[0]
         
-        # Get text embeddings
+        # 텍스트 임베딩 처리 부분 수정
         if self.offline_mode:
             if self.offline_vocabulary is not None:
                 text_embeddings = self.offline_vocabulary.unsqueeze(0).expand(batch_size, -1, -1)
@@ -131,12 +131,41 @@ class YOLOCLIP(nn.Module):
             if text_prompts is None:
                 raise ValueError("In online mode, text_prompts must be provided")
             
-            # Build online vocabulary from text prompts
-            text_embeddings = self.text_encoder(text_prompts)
-            
-            # If text_prompts is a list of strings (not batch), expand to batch size
-            if len(text_embeddings.shape) == 2:
-                text_embeddings = text_embeddings.unsqueeze(0).expand(batch_size, -1, -1)
+            # 텍스트 프롬프트 처리 개선
+            if isinstance(text_prompts, list):
+                if len(text_prompts) > 0 and isinstance(text_prompts[0], list):
+                    # 배치의 각 항목에 대한 텍스트 프롬프트가 개별적으로 제공된 경우
+                    all_embeddings = []
+                    for i in range(batch_size):
+                        # 배치 크기보다 프롬프트가 적은 경우 마지막 프롬프트 재사용
+                        sample_prompts = text_prompts[i] if i < len(text_prompts) else text_prompts[-1]
+                        emb = self.text_encoder(sample_prompts)
+                        all_embeddings.append(emb)
+                    
+                    # 배치의 모든 임베딩 스택
+                    if len(all_embeddings) == 1:
+                        text_embeddings = all_embeddings[0].unsqueeze(0).expand(batch_size, -1, -1)
+                    else:
+                        try:
+                            text_embeddings = torch.stack(all_embeddings)
+                        except RuntimeError:
+                            # 임베딩 차원이 일치하지 않는 경우
+                            max_classes = max([e.shape[0] for e in all_embeddings])
+                            padded_embeddings = []
+                            for emb in all_embeddings:
+                                if emb.shape[0] < max_classes:
+                                    padding = torch.zeros(max_classes - emb.shape[0], emb.shape[1], device=emb.device)
+                                    padded_emb = torch.cat([emb, padding], dim=0)
+                                    padded_embeddings.append(padded_emb)
+                                else:
+                                    padded_embeddings.append(emb)
+                            text_embeddings = torch.stack(padded_embeddings)
+                else:
+                    # 모든 샘플에 동일한 프롬프트 집합 사용
+                    text_embeddings = self.text_encoder(text_prompts).unsqueeze(0).expand(batch_size, -1, -1)
+    
+
+    
         
         # Extract features from backbone
         features = self.backbone(images)
