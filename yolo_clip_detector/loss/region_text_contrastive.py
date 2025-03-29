@@ -56,11 +56,30 @@ class RegionTextContrastiveLoss(nn.Module):
         """
         batch_size, num_regions, embed_dim = region_features.shape
         num_classes = text_embeddings.shape[1]
+        max_objects = region_labels.shape[1]
         
-        # 디버깅 출력 추가
-        print(f"region_labels shape: {region_labels.shape}")
-        print(f"region_labels min: {region_labels.min().item()}, max: {region_labels.max().item()}")
-        print(f"num_classes: {num_classes}")
+        # 디버깅 출력
+        logger.debug(f"region_features shape: {region_features.shape}")
+        logger.debug(f"region_labels shape: {region_labels.shape}")
+        logger.debug(f"num_classes: {num_classes}")
+        
+        # region_features 크기 조정 로직 추가
+        if num_regions != max_objects:
+            logger.info(f"Adjusting region_features from {num_regions} to {max_objects}")
+            if num_regions > max_objects:
+                # 크기가 더 큰 경우 잘라내기
+                region_features = region_features[:, :max_objects, :]
+            else:
+                # 크기가 더 작은 경우 패딩 추가
+                padding = torch.zeros(batch_size, max_objects - num_regions, embed_dim,
+                                    device=region_features.device)
+                region_features = torch.cat([region_features, padding], dim=1)
+                
+                # valid_mask도 같이 조정
+                if valid_mask is not None:
+                    padding_mask = torch.zeros(batch_size, max_objects - num_regions,
+                                            dtype=torch.bool, device=valid_mask.device)
+                    valid_mask = torch.cat([valid_mask, padding_mask], dim=1)
         
         # Normalize features and embeddings
         region_features = F.normalize(region_features, p=2, dim=-1)
@@ -81,7 +100,7 @@ class RegionTextContrastiveLoss(nn.Module):
             invalid_labels = region_labels >= num_classes
             if invalid_labels.any():
                 # 잘못된 레이블을 0으로 설정하고 나중에 손실 계산에서 제외
-                print(f"WARNING: {invalid_labels.sum().item()} labels exceed num_classes={num_classes}")
+                logger.warning(f"WARNING: {invalid_labels.sum().item()} labels exceed num_classes={num_classes}")
                 region_labels = torch.where(invalid_labels, torch.zeros_like(region_labels), region_labels)
                 
                 # valid_mask가 없으면 생성하고, 있으면 업데이트
@@ -101,9 +120,9 @@ class RegionTextContrastiveLoss(nn.Module):
         
         # If no valid mask is provided, create one that marks all regions as valid
         if valid_mask is None:
-            valid_mask = torch.ones(batch_size, num_regions, dtype=torch.bool, device=region_features.device)
+            valid_mask = torch.ones(batch_size, max_objects, dtype=torch.bool, device=region_features.device)
         
-        # Calculate top-k positives for each region
+        # Calculate top-k positives for each region - BOOLEAN 오류 수정
         if self.topk > 1:
             # Calculate similarity for positive classes
             pos_sim = similarity * labels_oh
@@ -111,8 +130,9 @@ class RegionTextContrastiveLoss(nn.Module):
             # Get top-k positive similarities for each region
             topk_values, _ = torch.topk(pos_sim, min(self.topk, num_classes), dim=-1)
             
-            # Take the average of top-k similarities
-            pos_weight = topk_values.sum(dim=-1) / min(self.topk, labels_oh.sum(dim=-1).clamp(min=1))
+            # 계산할 때 스칼라 값으로 변환하여 Boolean 텐서 오류 방지
+            topk_min = min(self.topk, int(labels_oh.sum(dim=-1).clamp(min=1).min().item()))
+            pos_weight = topk_values.sum(dim=-1) / topk_min
             pos_weight = pos_weight.unsqueeze(-1)
             
             # Apply weights to labels
@@ -134,7 +154,11 @@ class RegionTextContrastiveLoss(nn.Module):
         
         # Apply reduction
         if self.reduction == 'mean':
-            return loss.sum() / valid_mask.sum()
+            valid_mask_sum = valid_mask.sum()
+            if valid_mask_sum > 0:
+                return loss.sum() / valid_mask_sum
+            else:
+                return torch.tensor(0.0, device=loss.device)
         elif self.reduction == 'sum':
             return loss.sum()
         else:  # 'none'
