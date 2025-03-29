@@ -297,13 +297,40 @@ class YOLOCLIPTrainer:
                 
                 pred_boxes = outputs['boxes']
                 
-                # 크기 조정 - 예측 박스가 타겟 박스보다 크면 자르기
-                if pred_boxes.shape[1] > boxes.shape[1]:
+                # Handle size mismatch between predicted and target boxes
+                if pred_boxes.shape[1] != boxes.shape[1]:
                     logger.info(f"Adjusting pred_boxes from {pred_boxes.shape[1]} to {boxes.shape[1]}")
-                    pred_boxes = pred_boxes[:, :boxes.shape[1], :]
-                
+                    if pred_boxes.shape[1] > boxes.shape[1]:
+                        # Truncate to match target boxes
+                        pred_boxes = pred_boxes[:, :boxes.shape[1], :]
+                    else:
+                        # This case should be rare - we usually have more predictions than targets
+                        # Pad with zeros if needed
+                        padding = torch.zeros(
+                            pred_boxes.shape[0], 
+                            boxes.shape[1] - pred_boxes.shape[1], 
+                            pred_boxes.shape[2], 
+                            device=pred_boxes.device
+                        )
+                        pred_boxes = torch.cat([pred_boxes, padding], dim=1)
+
+                # 아래 코드를 추가: valid_mask 크기도 맞춰줌
+                if valid_mask is not None and valid_mask.shape[1] != pred_boxes.shape[1]:
+                    logger.info(f"Adjusting valid_mask from {valid_mask.shape[1]} to {pred_boxes.shape[1]}")
+                    if valid_mask.shape[1] > pred_boxes.shape[1]:
+                        # valid_mask가 더 크면 자르기
+                        valid_mask = valid_mask[:, :pred_boxes.shape[1]]
+                    else:
+                        # valid_mask가 더 작으면 False로 패딩
+                        padding = torch.zeros(
+                            valid_mask.shape[0],
+                            pred_boxes.shape[1] - valid_mask.shape[1],
+                            device=valid_mask.device,
+                            dtype=valid_mask.dtype
+                        )
+                        valid_mask = torch.cat([valid_mask, padding], dim=1)
+
                 iou_loss = self.iou_loss(pred_boxes, boxes, valid_mask)
-                
                 loss = (
                     self.loss_weights['contrastive'] * cont_loss +
                     self.loss_weights['iou'] * iou_loss
