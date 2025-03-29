@@ -243,9 +243,12 @@ class COCODataset(Dataset):
         
         # Create text prompts for each unique class in the image
         unique_classes = np.unique(class_ids)
-        text_prompts = [f"a photo of a {self.class_names[i]}" for i in unique_classes]
+        text_prompts = []
+        for class_id in unique_classes:
+            if class_id < len(self.class_names):  # 클래스 ID가 유효한지 확인
+                text_prompts.append(f"a photo of a {self.class_names[class_id]}")
         
-        # Ensure there's at least one prompt for images with no objects
+        # 텍스트 프롬프트가 없는 경우 기본값 추가
         if not text_prompts:
             text_prompts = [f"a photo of a {self.class_names[0]}"]
         
