@@ -12,6 +12,7 @@ from tqdm import tqdm
 from ..model.yolo_clip import YOLOCLIP
 from ..loss.region_text_contrastive import RegionTextContrastiveLoss
 from ..loss.iou_loss import IoULoss
+import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)
 
@@ -109,8 +110,8 @@ class YOLOCLIPTrainer:
                  f"max_epochs={max_epochs}, loss_weights={self.loss_weights}")
     
     def train_epoch(self, 
-                   dataloader: DataLoader, 
-                   epoch: int) -> Dict[str, float]:
+                dataloader: DataLoader, 
+                epoch: int) -> Dict[str, float]:
         """
         Train the model for one epoch.
         
@@ -136,7 +137,7 @@ class YOLOCLIPTrainer:
             images = batch['images'].to(self.device)
             boxes = batch['boxes'].to(self.device)
             class_ids = batch['class_ids'].to(self.device)
-            text_prompts = batch['text_prompts']
+            text_prompts = batch['text_prompts']  # This is a list of lists with potentially different lengths
             valid_mask = batch['valid_mask'].to(self.device) if 'valid_mask' in batch else None
             
             # Zero gradients
@@ -148,7 +149,7 @@ class YOLOCLIPTrainer:
             # Calculate losses
             # Region-text contrastive loss
             region_features = outputs['obj_embeddings']
-            text_embeddings = self.model.text_encoder(text_prompts).to(self.device)
+            text_embeddings = outputs['text_embeddings']  # Using the embeddings from model output
             
             cont_loss = self.contrastive_loss(
                 region_features, 
@@ -161,11 +162,12 @@ class YOLOCLIPTrainer:
             pred_boxes = outputs['boxes']
             iou_loss = self.iou_loss(pred_boxes, boxes, valid_mask)
             
-            # Distributed Focal Loss (DFL) - Simplified as MSE loss for demonstration
-            # In a real implementation, you would use DFL or other distribution loss
-            pred_box_preds = torch.cat([p.flatten(1) for p in outputs['box_preds']], dim=1)
-            target_box_preds = torch.cat([p.flatten(1) for p in batch['box_targets']], dim=1)
-            dfl_loss = nn.MSELoss()(pred_box_preds, target_box_preds)
+            # Simplified Distributed Focal Loss (DFL) as MSE loss
+            dfl_loss = torch.tensor(0.0, device=self.device)
+            if 'box_preds' in outputs and 'box_targets' in batch:
+                pred_box_preds = torch.cat([p.flatten(1) for p in outputs['box_preds']], dim=1)
+                target_box_preds = torch.cat([p.flatten(1) for p in batch['box_targets']], dim=1)
+                dfl_loss = F.mse_loss(pred_box_preds, target_box_preds)
             
             # Combine losses
             loss = (
