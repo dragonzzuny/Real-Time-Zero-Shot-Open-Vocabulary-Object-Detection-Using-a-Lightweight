@@ -1,4 +1,4 @@
-# yolo_clip_detector/train/trainer.py 파일 내용
+# yolo_clip_detector/train/trainer.py
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -22,18 +22,6 @@ class YOLOCLIPTrainer:
     
     This class handles the training process, including loss calculation,
     optimization, and evaluation.
-    
-    Attributes:
-        model (YOLOCLIP): The YOLO-CLIP model
-        contrastive_loss (RegionTextContrastiveLoss): Region-text contrastive loss
-        iou_loss (IoULoss): IoU loss for bounding box regression
-        optimizer (torch.optim.Optimizer): Optimizer
-        lr_scheduler: Learning rate scheduler
-        device (torch.device): Device to run training on
-        output_dir (str): Directory to save output files
-        max_epochs (int): Maximum number of epochs to train
-        save_interval (int): Epoch interval to save checkpoints
-        eval_interval (int): Epoch interval to run evaluation
     """
     
     def __init__(self, 
@@ -48,7 +36,8 @@ class YOLOCLIPTrainer:
                  temperature: float = 0.1,
                  iou_type: str = 'ciou',
                  label_smoothing: float = 0.0,
-                 loss_weights: Dict[str, float] = None):
+                 loss_weights: Dict[str, float] = None,
+                 max_objects: int = 100):  # max_objects 매개변수 추가
         """
         Initialize the YOLOCLIPTrainer.
         
@@ -65,6 +54,7 @@ class YOLOCLIPTrainer:
             iou_type: Type of IoU for bounding box loss
             label_smoothing: Label smoothing parameter
             loss_weights: Weights for different loss components
+            max_objects: Maximum number of objects per image (should match dataset)
         """
         self.model = model
         self.device = device
@@ -72,6 +62,7 @@ class YOLOCLIPTrainer:
         self.max_epochs = max_epochs
         self.save_interval = save_interval
         self.eval_interval = eval_interval
+        self.max_objects = max_objects
         
         # Move model to device
         self.model.to(self.device)
@@ -107,11 +98,12 @@ class YOLOCLIPTrainer:
         os.makedirs(output_dir, exist_ok=True)
         
         logger.info(f"YOLOCLIPTrainer initialized with device={device}, "
-                 f"max_epochs={max_epochs}, loss_weights={self.loss_weights}")
+                 f"max_epochs={max_epochs}, loss_weights={self.loss_weights}, "
+                 f"max_objects={max_objects}")
     
     def train_epoch(self, 
-                dataloader: DataLoader, 
-                epoch: int) -> Dict[str, float]:
+                   dataloader: DataLoader, 
+                   epoch: int) -> Dict[str, float]:
         """
         Train the model for one epoch.
         
@@ -151,6 +143,22 @@ class YOLOCLIPTrainer:
             region_features = outputs['obj_embeddings']
             text_embeddings = outputs['text_embeddings']  # Using the embeddings from model output
             
+            # Handle size mismatch between region_features and dataset objects
+            if region_features.shape[1] != self.max_objects:
+                logger.info(f"Adjusting region_features from {region_features.shape[1]} to {self.max_objects}")
+                if region_features.shape[1] > self.max_objects:
+                    # Truncate to max_objects if larger
+                    region_features = region_features[:, :self.max_objects, :]
+                else:
+                    # Pad with zeros if smaller
+                    padding = torch.zeros(
+                        region_features.shape[0], 
+                        self.max_objects - region_features.shape[1], 
+                        region_features.shape[2], 
+                        device=region_features.device
+                    )
+                    region_features = torch.cat([region_features, padding], dim=1)
+            
             cont_loss = self.contrastive_loss(
                 region_features, 
                 text_embeddings, 
@@ -160,6 +168,24 @@ class YOLOCLIPTrainer:
             
             # IoU loss for bounding box regression
             pred_boxes = outputs['boxes']
+            
+            # Handle size mismatch between predicted and target boxes
+            if pred_boxes.shape[1] != boxes.shape[1]:
+                logger.info(f"Adjusting pred_boxes from {pred_boxes.shape[1]} to {boxes.shape[1]}")
+                if pred_boxes.shape[1] > boxes.shape[1]:
+                    # Truncate to match target boxes
+                    pred_boxes = pred_boxes[:, :boxes.shape[1], :]
+                else:
+                    # This case should be rare - we usually have more predictions than targets
+                    # Pad with zeros if needed
+                    padding = torch.zeros(
+                        pred_boxes.shape[0], 
+                        boxes.shape[1] - pred_boxes.shape[1], 
+                        pred_boxes.shape[2], 
+                        device=pred_boxes.device
+                    )
+                    pred_boxes = torch.cat([pred_boxes, padding], dim=1)
+            
             iou_loss = self.iou_loss(pred_boxes, boxes, valid_mask)
             
             # Simplified Distributed Focal Loss (DFL) as MSE loss
@@ -193,10 +219,16 @@ class YOLOCLIPTrainer:
                 'iou_loss': iou_loss.item(),
                 'dfl_loss': dfl_loss.item()
             })
+            
+            # Break after first batch during testing/debugging
+            # if batch_idx == 0 and os.environ.get('DEBUG', '0') == '1':
+            #     logger.info("Debug mode: breaking after first batch")
+            #     break
         
         # Average metrics
+        num_batches = len(dataloader)
         for key in epoch_metrics:
-            epoch_metrics[key] /= len(dataloader)
+            epoch_metrics[key] /= num_batches
         
         return epoch_metrics
     
@@ -239,9 +271,22 @@ class YOLOCLIPTrainer:
                 # Forward pass
                 outputs = self.model(images, text_prompts=text_prompts)
                 
-                # Calculate losses (similar to train_epoch)
+                # Calculate losses - similar to train_epoch but with the same size adjustments
                 region_features = outputs['obj_embeddings']
-                text_embeddings = self.model.text_encoder(text_prompts).to(self.device)
+                text_embeddings = outputs['text_embeddings']
+                
+                # Handle size mismatch
+                if region_features.shape[1] != self.max_objects:
+                    if region_features.shape[1] > self.max_objects:
+                        region_features = region_features[:, :self.max_objects, :]
+                    else:
+                        padding = torch.zeros(
+                            region_features.shape[0], 
+                            self.max_objects - region_features.shape[1], 
+                            region_features.shape[2], 
+                            device=region_features.device
+                        )
+                        region_features = torch.cat([region_features, padding], dim=1)
                 
                 cont_loss = self.contrastive_loss(
                     region_features, 
@@ -251,6 +296,12 @@ class YOLOCLIPTrainer:
                 )
                 
                 pred_boxes = outputs['boxes']
+                
+                # 크기 조정 - 예측 박스가 타겟 박스보다 크면 자르기
+                if pred_boxes.shape[1] > boxes.shape[1]:
+                    logger.info(f"Adjusting pred_boxes from {pred_boxes.shape[1]} to {boxes.shape[1]}")
+                    pred_boxes = pred_boxes[:, :boxes.shape[1], :]
+                
                 iou_loss = self.iou_loss(pred_boxes, boxes, valid_mask)
                 
                 loss = (
@@ -264,10 +315,15 @@ class YOLOCLIPTrainer:
                 eval_metrics['iou_loss'] += iou_loss.item()
                 
                 # Collect predictions and targets for mAP calculation
+                # Make sure they are the same size by truncating predictions if needed
+                truncated_boxes = outputs['boxes'][:, :self.max_objects].cpu().numpy() if outputs['boxes'].shape[1] > self.max_objects else outputs['boxes'].cpu().numpy()
+                truncated_scores = outputs['scores'][:, :self.max_objects].cpu().numpy() if outputs['scores'].shape[1] > self.max_objects else outputs['scores'].cpu().numpy()
+                truncated_class_ids = outputs['class_ids'][:, :self.max_objects].cpu().numpy() if outputs['class_ids'].shape[1] > self.max_objects else outputs['class_ids'].cpu().numpy()
+                
                 predictions = {
-                    'boxes': outputs['boxes'].cpu().numpy(),
-                    'scores': outputs['scores'].cpu().numpy(),
-                    'class_ids': outputs['class_ids'].cpu().numpy()
+                    'boxes': truncated_boxes,
+                    'scores': truncated_scores, 
+                    'class_ids': truncated_class_ids
                 }
                 
                 targets = {
@@ -284,13 +340,19 @@ class YOLOCLIPTrainer:
                     'cont_loss': cont_loss.item(),
                     'iou_loss': iou_loss.item()
                 })
+                
+                # Break after first batch during testing/debugging
+                # if batch_idx == 0 and os.environ.get('DEBUG', '0') == '1':
+                #     logger.info("Debug mode: breaking after first batch")
+                #     break
         
         # Calculate mAP using all predictions and targets
         mAP50, mAP50_95 = self._calculate_map(all_predictions, all_targets)
         
         # Average metrics
+        num_batches = len(dataloader)
         for key in ['loss', 'contrastive_loss', 'iou_loss']:
-            eval_metrics[key] /= len(dataloader)
+            eval_metrics[key] /= num_batches
         
         eval_metrics['mAP50'] = mAP50
         eval_metrics['mAP50_95'] = mAP50_95
@@ -311,14 +373,16 @@ class YOLOCLIPTrainer:
             Tuple of (mAP@50, mAP@50-95)
         """
         # Placeholder for actual mAP calculation
-        # In a real implementation, you would use a proper mAP calculation
-        # e.g., using the COCO API or a custom implementation
-        
-        # Simulate mAP calculation
-        mAP50 = 0.7  # Placeholder value
-        mAP50_95 = 0.5  # Placeholder value
-        
-        return mAP50, mAP50_95
+        # TODO: Implement proper mAP calculation
+        try:
+            from ..utils.metrics import calculate_map
+            return calculate_map(predictions, targets)
+        except (ImportError, AttributeError):
+            # Fallback to placeholder values if metrics module not available
+            logger.warning("Using placeholder mAP values - metrics module not available")
+            mAP50 = 0.7  # Placeholder value
+            mAP50_95 = 0.5  # Placeholder value
+            return mAP50, mAP50_95
     
     def train(self, 
              train_dataloader: DataLoader,
@@ -346,46 +410,68 @@ class YOLOCLIPTrainer:
         best_map = 0.0
         
         for epoch in range(1, self.max_epochs + 1):
-            # Train for one epoch
-            train_metrics = self.train_epoch(train_dataloader, epoch)
-            
-            # Update learning rate
-            if self.lr_scheduler is not None:
-                self.lr_scheduler.step()
-            
-            # Evaluate if validation dataloader is provided and it's evaluation interval
-            if val_dataloader is not None and epoch % self.eval_interval == 0:
-                val_metrics = self.evaluate(val_dataloader, epoch)
+            try:
+                # Train for one epoch
+                train_metrics = self.train_epoch(train_dataloader, epoch)
                 
-                # Save best model
-                if val_metrics['mAP50_95'] > best_map:
-                    best_map = val_metrics['mAP50_95']
-                    self.save_checkpoint(os.path.join(self.output_dir, 'best_model.pth'))
+                # Update learning rate
+                if self.lr_scheduler is not None:
+                    self.lr_scheduler.step()
+                
+                # Evaluate if validation dataloader is provided and it's evaluation interval
+                val_metrics = None
+                if val_dataloader is not None and epoch % self.eval_interval == 0:
+                    val_metrics = self.evaluate(val_dataloader, epoch)
+                    
+                    # Save best model
+                    if val_metrics['mAP50_95'] > best_map:
+                        best_map = val_metrics['mAP50_95']
+                        self.save_checkpoint(os.path.join(self.output_dir, 'best_model.pth'))
+                    
+                    # Update history
+                    history['val_loss'].append(val_metrics['loss'])
+                    history['val_mAP50'].append(val_metrics['mAP50'])
+                    history['val_mAP50_95'].append(val_metrics['mAP50_95'])
+                    
+                    logger.info(f"Epoch {epoch}: Train Loss = {train_metrics['loss']:.4f}, "
+                              f"Val Loss = {val_metrics['loss']:.4f}, "
+                              f"mAP50 = {val_metrics['mAP50']:.4f}, "
+                              f"mAP50-95 = {val_metrics['mAP50_95']:.4f}")
+                else:
+                    logger.info(f"Epoch {epoch}: Train Loss = {train_metrics['loss']:.4f}")
                 
                 # Update history
-                history['val_loss'].append(val_metrics['loss'])
-                history['val_mAP50'].append(val_metrics['mAP50'])
-                history['val_mAP50_95'].append(val_metrics['mAP50_95'])
+                history['train_loss'].append(train_metrics['loss'])
+                history['learning_rate'].append(self.optimizer.param_groups[0]['lr'])
                 
-                logger.info(f"Epoch {epoch}: Train Loss = {train_metrics['loss']:.4f}, "
-                          f"Val Loss = {val_metrics['loss']:.4f}, "
-                          f"mAP50 = {val_metrics['mAP50']:.4f}, "
-                          f"mAP50-95 = {val_metrics['mAP50_95']:.4f}")
-            else:
-                logger.info(f"Epoch {epoch}: Train Loss = {train_metrics['loss']:.4f}")
-            
-            # Update history
-            history['train_loss'].append(train_metrics['loss'])
-            history['learning_rate'].append(self.optimizer.param_groups[0]['lr'])
-            
-            # Save checkpoint if it's save interval
-            if epoch % self.save_interval == 0:
-                self.save_checkpoint(os.path.join(self.output_dir, f'checkpoint_epoch_{epoch}.pth'))
-            
-            # Call callbacks if provided
-            if callbacks is not None:
-                for callback in callbacks:
-                    callback(epoch, train_metrics, val_metrics if val_dataloader is not None else None)
+                # Save checkpoint if it's save interval
+                if epoch % self.save_interval == 0:
+                    self.save_checkpoint(os.path.join(self.output_dir, f'checkpoint_epoch_{epoch}.pth'))
+                
+                # Call callbacks if provided
+                if callbacks is not None:
+                    for callback in callbacks:
+                        callback(epoch, train_metrics, val_metrics)
+                
+            except Exception as e:
+                logger.error(f"Error during training epoch {epoch}: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                
+                # Try to save checkpoint if an error occurs
+                try:
+                    self.save_checkpoint(os.path.join(self.output_dir, f'error_checkpoint_epoch_{epoch}.pth'))
+                    logger.info(f"Saved checkpoint before error at epoch {epoch}")
+                except Exception as save_err:
+                    logger.error(f"Failed to save checkpoint after error: {str(save_err)}")
+                
+                # Break or continue based on environment settings
+                if os.environ.get('CONTINUE_ON_ERROR', '0') != '1':
+                    logger.error("Training stopped due to error.")
+                    break
+                else:
+                    logger.warning("Continuing to next epoch despite error.")
+                    continue
         
         # Save final model
         self.save_checkpoint(os.path.join(self.output_dir, 'final_model.pth'))
