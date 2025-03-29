@@ -1,4 +1,3 @@
-# yolo_clip_detector/config/yolov8n_coco.yaml 파일 내용
 # YOLOv8n COCO Configuration
 
 # Include base configurations
@@ -29,3 +28,9 @@ loss_weights:
   contrastive: 1.0
   iou: 5.0
   dfl: 1.0
+
+# Dataset paths (adjust paths according to your setup)
+train_anno_path: "yolo_clip_detector/data/coco/annotations/instances_train2017.json"  # 학습 주석 파일 경로
+val_anno_path: "yolo_clip_detector/data/coco/annotations/instances_val2017.json"      # 검증 주석 파일 경로
+train_img_dir: "yolo_clip_detector/data/coco/train2017"                               # 학습 이미지 경로
+val_img_dir: "yolo_clip_detector/data/coco/val2017"                                 # 검증 이미지 경로

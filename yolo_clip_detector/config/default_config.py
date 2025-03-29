@@ -1,6 +1,9 @@
 # yolo_clip_detector/config/default_config.py 파일 내용
 from typing import Dict, List, Tuple, Any
+import os
 
+# 프로젝트 루트 디렉토리 찾기
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 class Config:
     """Base configuration class"""
     
@@ -25,10 +28,10 @@ class TrainingConfig(Config):
         self.reg_max = 16  # Maximum value for DFL (Distributed Focal Loss)
         
         # Dataset settings
-        self.train_anno_path = 'data/coco/annotations/instances_train2017.json'
-        self.train_img_dir = 'data/coco/train2017'
-        self.val_anno_path = 'data/coco/annotations/instances_val2017.json'
-        self.val_img_dir = 'data/coco/val2017'
+        self.train_anno_path = 'yolo_clip_detector/data/coco/annotations/instances_train2017.json'
+        self.train_img_dir = 'yolo_clip_detector/data/coco/train2017'
+        self.val_anno_path = 'yolo_clip_detector/data/coco/annotations/instances_val2017.json'
+        self.val_img_dir = 'yolo_clip_detector/data/coco/val2017'
         self.class_names = [  # COCO 80 classes
             'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat',
             'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat',
