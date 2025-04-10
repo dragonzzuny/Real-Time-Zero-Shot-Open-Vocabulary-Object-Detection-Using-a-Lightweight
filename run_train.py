@@ -10,7 +10,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
-
+from yolo_clip_detector.utils.data_utils import custom_collate_fn
 # 현재 디렉토리를 PYTHONPATH에 추가
 sys.path.insert(0, os.path.abspath('.'))
 
