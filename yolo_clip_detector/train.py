@@ -199,7 +199,8 @@ def main():
         temperature=config.temperature,
         iou_type=config.iou_type,
         label_smoothing=config.label_smoothing,
-        loss_weights=config.loss_weights
+        loss_weights=config.loss_weights,
+        max_objects=config.max_objects
     )
     
     # Load checkpoint if provided
