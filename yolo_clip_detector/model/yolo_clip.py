@@ -163,9 +163,6 @@ class YOLOCLIP(nn.Module):
                 else:
                     # 모든 샘플에 동일한 프롬프트 집합 사용
                     text_embeddings = self.text_encoder(text_prompts).unsqueeze(0).expand(batch_size, -1, -1)
-    
-
-    
         
         # Extract features from backbone
         features = self.backbone(images)
