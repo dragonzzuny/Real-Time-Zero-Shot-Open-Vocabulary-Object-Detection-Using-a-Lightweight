@@ -176,10 +176,15 @@ class YOLOCLIPTrainer:
             
             # Simplified Distributed Focal Loss (DFL) as MSE loss
             dfl_loss = torch.tensor(0.0, device=self.device)
+            print("DEBUG: box_preds in outputs:", 'box_preds' in outputs)
+            print("DEBUG: box_targets in batch:", 'box_targets' in batch)
             if 'box_preds' in outputs and 'box_targets' in batch:
                 pred_box_preds = torch.cat([p.flatten(1) for p in outputs['box_preds']], dim=1)
                 target_box_preds = torch.cat([p.flatten(1) for p in batch['box_targets']], dim=1)
+                print("DEBUG: pred_box_preds shape:", pred_box_preds.shape)
+                print("DEBUG: target_box_preds shape:", target_box_preds.shape)
                 dfl_loss = F.mse_loss(pred_box_preds, target_box_preds)
+                print("DEBUG: dfl_loss value:", dfl_loss.item())
             
             # Combine losses
             loss = (
