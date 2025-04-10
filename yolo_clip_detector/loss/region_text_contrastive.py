@@ -1,4 +1,4 @@
-# yolo_clip_detector/loss/region_text_contrastive.py
+# yolo_clip_detector/loss/region_text_contrastive.py 파일 내용
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -38,10 +38,10 @@ class RegionTextContrastiveLoss(nn.Module):
                    f"reduction={reduction}, topk={topk}, label_smoothing={label_smoothing}")
     
     def forward(self, 
-            region_features: torch.Tensor, 
-            text_embeddings: torch.Tensor, 
-            region_labels: torch.Tensor,
-            valid_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+                region_features: torch.Tensor, 
+                text_embeddings: torch.Tensor, 
+                region_labels: torch.Tensor,
+                valid_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Compute the region-text contrastive loss.
         
