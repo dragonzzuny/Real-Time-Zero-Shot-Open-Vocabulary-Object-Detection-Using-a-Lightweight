@@ -17,6 +17,7 @@ def custom_collate_fn(batch):
     """
     if not batch:
         return {}
+    print("DEBUG: Keys in first batch item:", batch[0].keys())
     
     elem = batch[0]
     result = {}
@@ -33,6 +34,8 @@ def custom_collate_fn(batch):
                 logger.warning(f"Could not collate field {key}: {str(e)}")
                 # 기본 collate가 실패하면 리스트로 유지
                 result[key] = [d[key] for d in batch]
+
+    print("DEBUG: Keys in collated batch:", result.keys())
     
     return result
 
