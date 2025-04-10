@@ -1,4 +1,5 @@
 # yolo_clip_detector/train/trainer.py
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -143,22 +144,7 @@ class YOLOCLIPTrainer:
             region_features = outputs['obj_embeddings']
             text_embeddings = outputs['text_embeddings']  # Using the embeddings from model output
             
-            # Handle size mismatch between region_features and dataset objects
-            if region_features.shape[1] != self.max_objects:
-                logger.info(f"Adjusting region_features from {region_features.shape[1]} to {self.max_objects}")
-                if region_features.shape[1] > self.max_objects:
-                    # Truncate to max_objects if larger
-                    region_features = region_features[:, :self.max_objects, :]
-                else:
-                    # Pad with zeros if smaller
-                    padding = torch.zeros(
-                        region_features.shape[0], 
-                        self.max_objects - region_features.shape[1], 
-                        region_features.shape[2], 
-                        device=region_features.device
-                    )
-                    region_features = torch.cat([region_features, padding], dim=1)
-            
+            # HandleContrastive Loss - 크기 조정은 loss 함수 내부에서 자동으로 처리됨
             cont_loss = self.contrastive_loss(
                 region_features, 
                 text_embeddings, 
@@ -219,11 +205,6 @@ class YOLOCLIPTrainer:
                 'iou_loss': iou_loss.item(),
                 'dfl_loss': dfl_loss.item()
             })
-            
-            # Break after first batch during testing/debugging
-            # if batch_idx == 0 and os.environ.get('DEBUG', '0') == '1':
-            #     logger.info("Debug mode: breaking after first batch")
-            #     break
         
         # Average metrics
         num_batches = len(dataloader)
@@ -275,19 +256,7 @@ class YOLOCLIPTrainer:
                 region_features = outputs['obj_embeddings']
                 text_embeddings = outputs['text_embeddings']
                 
-                # Handle size mismatch
-                if region_features.shape[1] != self.max_objects:
-                    if region_features.shape[1] > self.max_objects:
-                        region_features = region_features[:, :self.max_objects, :]
-                    else:
-                        padding = torch.zeros(
-                            region_features.shape[0], 
-                            self.max_objects - region_features.shape[1], 
-                            region_features.shape[2], 
-                            device=region_features.device
-                        )
-                        region_features = torch.cat([region_features, padding], dim=1)
-                
+                # 크기 조정은 loss 함수 내부에서 자동으로 처리됨
                 cont_loss = self.contrastive_loss(
                     region_features, 
                     text_embeddings, 
@@ -297,40 +266,13 @@ class YOLOCLIPTrainer:
                 
                 pred_boxes = outputs['boxes']
                 
-                # Handle size mismatch between predicted and target boxes
-                if pred_boxes.shape[1] != boxes.shape[1]:
+                # 크기 조정 - 예측 박스가 타겟 박스보다 크면 자르기
+                if pred_boxes.shape[1] > boxes.shape[1]:
                     logger.info(f"Adjusting pred_boxes from {pred_boxes.shape[1]} to {boxes.shape[1]}")
-                    if pred_boxes.shape[1] > boxes.shape[1]:
-                        # Truncate to match target boxes
-                        pred_boxes = pred_boxes[:, :boxes.shape[1], :]
-                    else:
-                        # This case should be rare - we usually have more predictions than targets
-                        # Pad with zeros if needed
-                        padding = torch.zeros(
-                            pred_boxes.shape[0], 
-                            boxes.shape[1] - pred_boxes.shape[1], 
-                            pred_boxes.shape[2], 
-                            device=pred_boxes.device
-                        )
-                        pred_boxes = torch.cat([pred_boxes, padding], dim=1)
-
-                # 아래 코드를 추가: valid_mask 크기도 맞춰줌
-                if valid_mask is not None and valid_mask.shape[1] != pred_boxes.shape[1]:
-                    logger.info(f"Adjusting valid_mask from {valid_mask.shape[1]} to {pred_boxes.shape[1]}")
-                    if valid_mask.shape[1] > pred_boxes.shape[1]:
-                        # valid_mask가 더 크면 자르기
-                        valid_mask = valid_mask[:, :pred_boxes.shape[1]]
-                    else:
-                        # valid_mask가 더 작으면 False로 패딩
-                        padding = torch.zeros(
-                            valid_mask.shape[0],
-                            pred_boxes.shape[1] - valid_mask.shape[1],
-                            device=valid_mask.device,
-                            dtype=valid_mask.dtype
-                        )
-                        valid_mask = torch.cat([valid_mask, padding], dim=1)
-
+                    pred_boxes = pred_boxes[:, :boxes.shape[1], :]
+                
                 iou_loss = self.iou_loss(pred_boxes, boxes, valid_mask)
+                
                 loss = (
                     self.loss_weights['contrastive'] * cont_loss +
                     self.loss_weights['iou'] * iou_loss
@@ -367,11 +309,6 @@ class YOLOCLIPTrainer:
                     'cont_loss': cont_loss.item(),
                     'iou_loss': iou_loss.item()
                 })
-                
-                # Break after first batch during testing/debugging
-                # if batch_idx == 0 and os.environ.get('DEBUG', '0') == '1':
-                #     logger.info("Debug mode: breaking after first batch")
-                #     break
         
         # Calculate mAP using all predictions and targets
         mAP50, mAP50_95 = self._calculate_map(all_predictions, all_targets)
